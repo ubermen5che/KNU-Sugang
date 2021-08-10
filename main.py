@@ -2,6 +2,7 @@ from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions
 from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import NoSuchElementException
 from bs4 import BeautifulSoup
 import requests
 from requests.adapters import HTTPAdapter
@@ -53,7 +54,7 @@ def getLecInfo(lecCode):
     session.mount("http://", HTTPAdapter(max_retries=1000))
     # response = session.post(CONFIG["general"]["lecinfo_url"], data={
     response = session.post("http://my.knu.ac.kr/stpo/stpo/cour/lectReqCntEnq/list.action", data={
-        "lectReqCntEnq.search_open_yr_trm": "20201",
+        "lectReqCntEnq.search_open_yr_trm": "20212",
         "lectReqCntEnq.search_subj_cde": lecCode[0:7],
         "lectReqCntEnq.search_sub_class_cde": lecCode[7:],
         "searchValue": lecCode
@@ -68,6 +69,7 @@ def getLecInfo(lecCode):
         "lect_quota": int(soup.find("td", class_="lect_quota").text),
         "lect_req_cnt": int(soup.find("td", class_="lect_req_cnt").text),
     }
+
     return res
 
 
@@ -124,11 +126,17 @@ if __name__ == "__main__":
                     raise Exception("LoginFailureException")
                 
             print("VERBOSE", f"Remain {remain_sec}sec")
-            
+
             ## Main logic
-            regTable = browser.find_element_by_css_selector("#onlineLectReqGrid > div.data > table > tbody")
-            packTable = browser.find_element_by_css_selector("#lectPackReqGrid > div.data > table > tbody")
-            
+            is_find_element = False
+            while(not is_find_element):
+                try:
+                    time.sleep(CONFIG["general"]["delay_sec"])
+                    regTable = browser.find_element_by_css_selector("#onlineLectReqGrid > div.data > table > tbody")
+                    packTable = browser.find_element_by_css_selector("#lectPackReqGrid > div.data > table > tbody")
+                    is_find_element = True
+                except NoSuchElementException as ne:
+                    browser.refresh()
             r = pool.map(getLecInfo, CONFIG["request"]["lectures"])
             # print(r)
 
@@ -170,14 +178,22 @@ if __name__ == "__main__":
                                 td[10].click()
                                 WebDriverWait(browser, 0).until(expected_conditions.alert_is_present())
                                 alert = browser.switch_to.alert
-                                print("INFO", f"{lecInfo['subj_class_cde']}: {alert.text}")
-                                alert.accept()
-                                succeed = True
+                                if alert.text == "지금은 수강신청 할 수 있는 과목이 없습니다.":
+                                    alert.accept()
+                                    succeed = False
+                                elif alert.text == "지금은 교양과목은 신청할 수 없습니다.":
+                                    alert.accept()
+                                    succeed = False
+                                else:
+                                    print("INFO", f"{lecInfo['subj_class_cde']}: {alert.text}")
+                                    alert.accept()
+                                    succeed = True
                             except TimeoutException:
                                 print("INFO", "no alert")
                     if not succeed:
                         print("ERROR", "Not found in packTable")
                 else:
+                    print("VERBOSE", "full...")
                     continue
             time.sleep(CONFIG["general"]["delay_sec"])
 
